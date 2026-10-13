@@ -16,9 +16,9 @@ const VARIANT_CLASSES: Record<string, string> = {
 };
 
 const SIZE_CLASSES: Record<string, string> = {
-  sm: "text-sm px-3 py-1.5 gap-1.5",
-  md: "text-sm px-4 py-2.5 gap-2",
-  lg: "text-base px-6 py-3.5 gap-2.5",
+  sm: "min-h-9 text-sm px-3 py-1.5 gap-1.5",
+  md: "min-h-11 text-sm px-4 py-2.5 gap-2",
+  lg: "min-h-12 text-base px-6 py-3.5 gap-2.5",
 };
 
 export function Button({
@@ -33,7 +33,7 @@ export function Button({
   return (
     <button
       className={clsx(
-        "inline-flex items-center justify-center rounded-xl font-semibold transition-all duration-150",
+        "inline-flex items-center justify-center text-center leading-snug rounded-xl font-semibold transition-all duration-150",
         "disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:brightness-100",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-secondary focus-visible:ring-offset-2 focus-visible:ring-offset-canvas",
         VARIANT_CLASSES[variant],

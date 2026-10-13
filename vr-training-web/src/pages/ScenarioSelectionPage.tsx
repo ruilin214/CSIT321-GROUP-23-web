@@ -59,7 +59,7 @@ export default function ScenarioSelectionPage() {
                           : "cursor-not-allowed opacity-60"
                       }`}
                     >
-                      <div className="flex items-start justify-between">
+                      <div className="flex flex-wrap items-start justify-between gap-2">
                         <h3 className="text-base font-semibold text-ink">{s.name}</h3>
                         {s.available ? (
                           <StatusChip kind="success" label="Available" />
@@ -71,7 +71,7 @@ export default function ScenarioSelectionPage() {
                         {s.available ? s.description : "Content ready for future Unity integration."}
                       </p>
                       {s.available && (
-                        <div className="flex items-center gap-4 text-xs text-muted">
+                        <div className="flex flex-wrap items-center gap-3 text-xs text-muted">
                           <span className="flex items-center gap-1">
                             <Clock size={13} /> ~{s.estimatedMinutes} min
                           </span>

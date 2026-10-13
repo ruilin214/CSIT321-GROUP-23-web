@@ -1,103 +1,27 @@
-import { useNavigate } from "react-router-dom";
-import { motion } from "framer-motion";
-import { GraduationCap, LineChart, ShieldAlert, Headset } from "lucide-react";
-import { Card } from "../components/common/Card";
-import { StatusChip } from "../components/common/StatusChip";
-import { PageTransition } from "../components/layout/PageTransition";
-import { useTrainingStore } from "../store/useTrainingStore";
-
-const ROLES = [
-  {
-    role: "trainee" as const,
-    userId: "Trainee01",
-    title: "Trainee",
-    description: "Practice scenarios, track your progress, and review past attempts.",
-    icon: Headset,
-    available: true,
-  },
-  {
-    role: "educator" as const,
-    userId: "Educator01",
-    title: "Educator",
-    description: "Review trainee performance and monitor training outcomes.",
-    icon: LineChart,
-    available: true,
-  },
-  {
-    role: "administrator" as const,
-    userId: "Admin01",
-    title: "Administrator",
-    description: "Manage modules and configure scenarios.",
-    icon: ShieldAlert,
-    available: false,
-  },
-];
-
+import { useState, type FormEvent } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { Card } from '../components/common/Card';
+import { Button } from '../components/common/Button';
+import { useTrainingStore } from '../store/useTrainingStore';
+import { authService, cloudConfigured } from '../services/authService';
 export default function RoleSelectionPage() {
-  const navigate = useNavigate();
-  const selectRole = useTrainingStore((s) => s.selectRole);
-
-  function handleSelect(role: (typeof ROLES)[number]) {
-    if (!role.available) return;
-    selectRole(role.role, role.userId);
-    navigate(role.role === "educator" ? "/educator" : "/home");
+  const navigate = useNavigate(); const [email, setEmail] = useState(''); const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState(false); const [message, setMessage] = useState('');
+  async function login(e: FormEvent) {
+    e.preventDefault(); setBusy(true); setMessage('');
+    try { const user = await authService.login(email.trim(), password); useTrainingStore.getState().setUser(user); navigate(user.role === 'educator' ? '/educator' : '/home'); }
+    catch (err) { setMessage((err as Error).message); } finally { setBusy(false); }
   }
-
-  return (
-    <PageTransition>
-      <div className="flex min-h-screen flex-col items-center justify-center px-6 py-12">
-        <div className="mb-10 flex flex-col items-center text-center">
-          <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl border border-primary/40 text-primary">
-            <GraduationCap size={28} />
-          </div>
-          <h1 className="text-2xl font-bold text-ink sm:text-3xl">VR Training Simulator</h1>
-          <p className="mt-2 max-w-md text-sm text-muted">
-            Select a role to continue. This is a web demonstration prototype - choose Trainee or Educator to explore
-            the full experience.
-          </p>
-        </div>
-
-        <div className="grid w-full max-w-4xl grid-cols-1 gap-5 sm:grid-cols-3">
-          {ROLES.map((r, idx) => {
-            const Icon = r.icon;
-            return (
-              <motion.div
-                key={r.role}
-                initial={{ opacity: 0, y: 16 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: idx * 0.08 }}
-              >
-                <Card
-                  raised
-                  onClick={() => handleSelect(r)}
-                  className={`flex h-full cursor-pointer flex-col gap-4 transition-all hover:border-primary/50 ${
-                    !r.available ? "cursor-not-allowed opacity-60 hover:border-border" : "hover:-translate-y-1"
-                  }`}
-                >
-                  <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-canvas text-primary">
-                    <Icon size={22} />
-                  </div>
-                  <div className="flex-1">
-                    <h2 className="text-lg font-semibold text-ink">{r.title}</h2>
-                    <p className="mt-1 text-sm text-muted">{r.description}</p>
-                  </div>
-                  {r.available ? (
-                    <StatusChip kind="success" label="Available" />
-                  ) : (
-                    <StatusChip kind="locked" label="Coming Soon" />
-                  )}
-                </Card>
-              </motion.div>
-            );
-          })}
-        </div>
-
-        <p className="mt-10 max-w-lg text-center text-xs text-muted">
-          This browser prototype demonstrates the complete user journey and interface behaviour of the proposed VR
-          Training Simulator. Physical XR interactions are represented using web-based animation and pointer
-          interactions pending Unity integration.
-        </p>
-      </div>
-    </PageTransition>
-  );
+  return <main className="mx-auto max-w-3xl px-6 py-16"><h1 className="text-3xl font-bold">Industrial Safety Training</h1><p className="mb-8 mt-3 text-muted">Train in Unity, review your results, and track progress.</p>
+    <Card><h2 className="mb-2 text-lg font-semibold">Sign in</h2><p className="mb-5 text-sm text-muted">Use your account to save training records across devices.</p>
+      {!cloudConfigured && <p role="status" className="mb-4 rounded-lg border border-warning/40 p-3 text-sm text-warning">Cloud accounts are not configured. Add your Supabase configuration and restart the website to sign in.</p>}
+      <form onSubmit={login} className="space-y-4">
+        <label className="block" htmlFor="login-email">Email<input id="login-email" required type="email" autoComplete="username" className="mt-1 block w-full rounded-lg bg-raised p-3" value={email} onChange={e => setEmail(e.target.value)} /></label>
+        <label className="block" htmlFor="login-password">Password<input id="login-password" required type="password" autoComplete="current-password" className="mt-1 block w-full rounded-lg bg-raised p-3" value={password} onChange={e => setPassword(e.target.value)} /></label>
+        <Button fullWidth disabled={busy || !cloudConfigured} type="submit">{busy ? 'Signing in…' : 'Sign in'}</Button>
+      </form>
+      {message && <p role="alert" className="mt-3 text-sm text-warning">{message}</p>}
+      <p className="mt-5 text-center text-sm text-muted">New to training? <Link to="/register" className="font-semibold text-primary underline underline-offset-4">Create an account</Link></p>
+    </Card>
+  </main>;
 }

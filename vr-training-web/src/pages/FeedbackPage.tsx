@@ -18,7 +18,8 @@ export default function FeedbackPage() {
   const { sessionId } = useParams();
   const navigate = useNavigate();
   const sessions = useTrainingStore((s) => s.sessions);
-  const session = sessions.find((s) => s.sessionId === sessionId);
+  const user = useTrainingStore(s => s.currentUser);
+  const session = sessions.find(s => s.sessionId === sessionId && (s.userId === user?.userId || user?.role === "educator"));
 
   if (!session) {
     return (
@@ -40,7 +41,7 @@ export default function FeedbackPage() {
 
   return (
     <PageTransition>
-      <AppHeader title="Scenario Complete" subtitle={session.scenarioName} />
+      <AppHeader title="Scenario Complete" subtitle={`${session.scenarioName} · ${session.source === "demo" ? "Demo result" : "Unity result"}`} />
       <div className="mx-auto max-w-3xl px-6 py-10">
         <Card raised className="flex flex-col items-center py-10 text-center">
           <div className="relative mb-4 h-32 w-32">

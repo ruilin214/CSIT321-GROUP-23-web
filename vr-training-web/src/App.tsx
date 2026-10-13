@@ -1,3 +1,4 @@
+import { SyncStatus } from "./components/common/SyncStatus";
 import { useEffect } from "react";
 import type { ReactElement } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
@@ -5,6 +6,7 @@ import { AnimatePresence } from "framer-motion";
 import { useTrainingStore } from "./store/useTrainingStore";
 import { ToastProvider } from "./components/common/Toast";
 
+import RegisterPage from "./pages/RegisterPage";
 import RoleSelectionPage from "./pages/RoleSelectionPage";
 import MainMenuPage from "./pages/MainMenuPage";
 import ScenarioSelectionPage from "./pages/ScenarioSelectionPage";
@@ -35,6 +37,16 @@ export default function App() {
   const location = useLocation();
   const settings = useTrainingStore((s) => s.settings);
 
+  const initialized = useTrainingStore(s => s.initialized);
+  useEffect(() => {
+    void useTrainingStore.getState().initialize();
+    const sync = () => { void useTrainingStore.getState().sync(); };
+    const pauseOnLeave = () => { try { useTrainingStore.getState().pauseSession(); } catch { /* persistence error remains visible */ } };
+    window.addEventListener('online', sync);
+    window.addEventListener('pagehide', pauseOnLeave);
+    const timer = setInterval(sync, 30000);
+    return () => { window.removeEventListener('online', sync); window.removeEventListener('pagehide', pauseOnLeave); clearInterval(timer); };
+  }, []);
   // Apply accessibility settings globally and immediately - text scaling,
   // high contrast, and reduced motion all take effect app-wide the moment
   // they change, not just on the Settings page itself.
@@ -52,12 +64,15 @@ export default function App() {
     root.classList.toggle("reduced-motion", settings.reducedMotion);
   }, [settings.textSize, settings.highContrast, settings.reducedMotion]);
 
+  if (!initialized) return <div className="p-10">Loading account…</div>;
   return (
     <ToastProvider>
+      <SyncStatus />
       <AnimatePresence mode="wait">
         <Routes location={location} key={location.pathname}>
           <Route path="/" element={<Navigate to="/role" replace />} />
           <Route path="/role" element={<RoleSelectionPage />} />
+          <Route path="/register" element={<RegisterPage />} />
           <Route
             path="/home"
             element={

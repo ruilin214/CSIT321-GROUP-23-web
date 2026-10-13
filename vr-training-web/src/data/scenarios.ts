@@ -16,13 +16,13 @@ export const scenarios: Scenario[] = [
       "Inspect equipment for damage before relying on it",
     ],
     controls: [
-      "Click or tap an object to select it",
-      "Drag an item to move it",
-      "Click a hotspot to inspect it",
+      "Use the headset controllers and controls shown in the VR scene",
+      "Enter immersive VR using the player’s VR button",
+      "Inspect equipment before confirming each task",
       "Use the on-screen buttons to confirm a choice",
     ],
     safetyInstructions:
-      "This is a desktop demonstration of a VR safety scenario. No physical equipment is required. Take breaks between attempts if needed.",
+      "Clear a safe play area and follow your headset boundary. Stop if you feel discomfort. A compatible VR headset and integrated WebXR build are required.",
     passScore: 70,
     tasks: [
       {

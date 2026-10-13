@@ -3,6 +3,9 @@ export type UserRole = "trainee" | "educator" | "administrator";
 export interface UserSession {
   userId: string;
   role: UserRole;
+  authMode?: "demo" | "cloud";
+  email?: string;
+  fullName?: string;
 }
 
 export interface TrainingTask {
@@ -36,13 +39,18 @@ export type SessionStatus = "in-progress" | "completed" | "exited";
 export interface InteractionLog {
   id: string;
   timestamp: string;
-  type: "task-completed" | "mistake" | "session-started" | "session-finished" | "paused" | "resumed" | "exited";
+  type: "task-completed" | "mistake" | "session-started" | "session-finished" | "paused" | "resumed" | "exited" | "xr-changed";
   taskId?: string;
   message?: string;
 }
 
 export interface SessionResult {
   sessionId: string;
+  source?: "unity" | "demo";
+  trainingMode?: "desktop" | "vr";
+  usedVR?: boolean;
+  revision?: number;
+  runningSince?: number;
   userId: string;
   scenarioId: string;
   scenarioName: string;

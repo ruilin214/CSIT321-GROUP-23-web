@@ -1,17 +1,15 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { CheckCircle2, Clock, Database, Download, Gauge, Target, Trash2, Users } from "lucide-react";
+import { CheckCircle2, Clock, Download, Gauge, Target, Trash2, Users } from "lucide-react";
 import { AppHeader } from "../components/layout/AppHeader";
 import { PageTransition } from "../components/layout/PageTransition";
 import { Card } from "../components/common/Card";
 import { Button } from "../components/common/Button";
 import { StatusChip } from "../components/common/StatusChip";
-import { Dialog } from "../components/common/Dialog";
 import { MetricCard } from "../components/dashboard/MetricCard";
 import { ScoreLineChart, PassFailDonut, ScenarioAverageBarChart, MistakesOverTimeChart } from "../components/dashboard/Charts";
 import { useTrainingStore } from "../store/useTrainingStore";
 import { sessionRepository } from "../services/sessionRepository";
-import { generateDemoSessions } from "../services/demoDataService";
 
 function formatDuration(seconds: number): string {
   const m = Math.floor(seconds / 60);
@@ -22,15 +20,12 @@ function formatDuration(seconds: number): string {
 export default function EducatorDashboardPage() {
   const navigate = useNavigate();
   const sessions = useTrainingStore((s) => s.sessions);
-  const seedDemoData = useTrainingStore((s) => s.seedDemoData);
-  const clearDemoData = useTrainingStore((s) => s.clearDemoData);
 
   const [userFilter, setUserFilter] = useState("all");
   const [scenarioFilter, setScenarioFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
-  const [confirmClear, setConfirmClear] = useState(false);
 
   const users = useMemo(() => Array.from(new Set(sessions.map((s) => s.userId))), [sessions]);
   const scenarioNames = useMemo(() => Array.from(new Set(sessions.map((s) => s.scenarioName))), [sessions]);
@@ -54,10 +49,6 @@ export default function EducatorDashboardPage() {
   const passRate = sessionRepository.calculatePassRate(filtered);
   const totalMistakes = filtered.reduce((sum, s) => sum + s.mistakeCount, 0);
 
-  function handleGenerateDemoData() {
-    seedDemoData(generateDemoSessions(12));
-  }
-
   function handleExportJson() {
     const blob = new Blob([JSON.stringify(sessions, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -77,15 +68,10 @@ export default function EducatorDashboardPage() {
             Back to menu
           </Button>
           <div className="flex flex-wrap gap-2">
-            <Button variant="secondary" size="sm" icon={<Database size={14} />} onClick={handleGenerateDemoData}>
-              Generate Demo Data
-            </Button>
             <Button variant="secondary" size="sm" icon={<Download size={14} />} onClick={handleExportJson}>
               Export JSON
             </Button>
-            <Button variant="ghost" size="sm" icon={<Trash2 size={14} />} onClick={() => setConfirmClear(true)}>
-              Clear Demo Data
-            </Button>
+
           </div>
         </div>
 
@@ -159,7 +145,7 @@ export default function EducatorDashboardPage() {
         {/* Session table */}
         {filtered.length === 0 ? (
           <Card className="py-16 text-center text-sm text-muted">
-            No session data yet. Click "Generate Demo Data" to populate the dashboard for a presentation.
+            No training data yet. Completed headset attempts will appear here.
           </Card>
         ) : (
           <div className="overflow-hidden rounded-2xl border border-border">
@@ -202,21 +188,7 @@ export default function EducatorDashboardPage() {
         )}
       </div>
 
-      <Dialog
-        open={confirmClear}
-        onClose={() => setConfirmClear(false)}
-        title="Clear demo data?"
-        footer={
-          <>
-            <Button variant="ghost" onClick={() => setConfirmClear(false)}>Cancel</Button>
-            <Button variant="danger" onClick={() => { clearDemoData(); setConfirmClear(false); }}>
-              Clear demo data
-            </Button>
-          </>
-        }
-      >
-        This removes only the generated demo sessions from this browser. Real trainee attempts are not affected.
-      </Dialog>
+
     </PageTransition>
   );
 }

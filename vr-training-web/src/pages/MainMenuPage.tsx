@@ -23,9 +23,9 @@ export default function MainMenuPage() {
   if (currentUser?.role === "educator") {
     return (
       <PageTransition>
-        <AppHeader title="Main Menu" subtitle="Desktop Demonstration Mode" />
+        <AppHeader title="Main Menu" subtitle="VR Headset Training" />
         <div className="mx-auto max-w-3xl px-6 py-12">
-          <h2 className="text-xl font-semibold text-ink">Welcome back, {currentUser.userId}</h2>
+          <h2 className="text-xl font-semibold text-ink">Welcome back, {currentUser.fullName || currentUser.email || "Trainee"}</h2>
           <p className="mt-1 text-sm text-muted">Review trainee performance or adjust your settings.</p>
 
           <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -53,14 +53,14 @@ export default function MainMenuPage() {
 
   return (
     <PageTransition>
-      <AppHeader title="VR Training Simulator" subtitle="Desktop Demonstration Mode" />
+      <AppHeader title="VR Training Simulator" subtitle="VR Headset Training" />
       <div className="mx-auto max-w-3xl px-6 py-12">
         <motion.h2
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
           className="text-2xl font-bold text-ink"
         >
-          Welcome back, {currentUser?.userId}
+          Welcome back, {currentUser?.fullName || currentUser?.email || "Trainee"}
         </motion.h2>
         <p className="mt-1 text-sm text-muted">Select an option to begin.</p>
 
@@ -77,7 +77,7 @@ export default function MainMenuPage() {
             <p className="mt-1 text-sm text-muted">
               {activeSession
                 ? `Resume "${activeSession.scenarioName}" - ${activeSession.completedTaskCount}/${activeSession.totalTaskCount} tasks done.`
-                : "Choose a scenario and begin a new simulation."}
+                : "Choose a scenario for immersive headset training."}
             </p>
           </Card>
 
@@ -112,7 +112,7 @@ export default function MainMenuPage() {
               Role: <span className="text-ink">{currentUser?.role}</span>
             </p>
             <p className="text-sm text-muted">
-              User: <span className="text-ink">{currentUser?.userId}</span>
+              User: <span className="text-ink">{currentUser?.fullName || currentUser?.email || "Trainee"}</span>
             </p>
             <div className="mt-3">
               <Button variant="ghost" size="sm" icon={<SettingsIcon size={14} />} onClick={() => navigate("/settings")}>

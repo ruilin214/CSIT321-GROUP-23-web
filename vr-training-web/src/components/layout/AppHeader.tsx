@@ -22,7 +22,7 @@ export function AppHeader({ title, subtitle }: { title: string; subtitle?: strin
       <div className="flex items-center gap-4">
         {currentUser && (
           <span className="hidden text-xs text-muted sm:inline">
-            {currentUser.userId} &middot; {currentUser.role}
+            {currentUser.fullName || currentUser.email || "Trainee"} &middot; {currentUser.role}
           </span>
         )}
         <button
@@ -34,9 +34,8 @@ export function AppHeader({ title, subtitle }: { title: string; subtitle?: strin
         </button>
         {currentUser && (
           <button
-            onClick={() => {
-              signOut();
-              navigate("/role");
+            onClick={async () => {
+              try { await signOut(); navigate("/role"); } catch (e) { useTrainingStore.getState().reportError((e as Error).message); }
             }}
             className="rounded-lg p-2 text-muted hover:bg-raised hover:text-danger"
             aria-label="Sign out"

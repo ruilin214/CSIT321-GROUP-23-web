@@ -116,7 +116,7 @@ export default function HistoryPage() {
             <option value="date">Sort by date</option>
             <option value="score">Sort by score</option>
           </select>
-          {mySessions.length > 0 && (
+          {mySessions.length > 0 && currentUser?.authMode !== "cloud" && (
             <Button variant="ghost" size="sm" icon={<Trash2 size={14} />} onClick={() => setConfirmClear(true)}>
               Clear history
             </Button>
@@ -152,7 +152,7 @@ export default function HistoryPage() {
                     onClick={() => s.status === "completed" && navigate(`/feedback/${s.sessionId}`)}
                   >
                     {currentUser?.role === "educator" && <td className="px-4 py-3 text-ink">{s.userId}</td>}
-                    <td className="px-4 py-3 text-ink">{s.scenarioName}</td>
+                    <td className="px-4 py-3 text-ink">{s.scenarioName}<div className="text-xs text-muted">{s.source === "demo" || s.sessionId.startsWith("demo-") ? "Workflow demo" : "Unity training"} · {s.usedVR ? "VR used" : s.trainingMode ?? "desktop"}</div></td>
                     <td className="px-4 py-3 text-muted">{formatDate(s.endTime ?? s.startTime)}</td>
                     <td className="px-4 py-3 text-ink">{s.finalScore}/{s.maxPossibleScore}</td>
                     <td className="px-4 py-3 text-muted">{formatDuration(s.durationSeconds)}</td>

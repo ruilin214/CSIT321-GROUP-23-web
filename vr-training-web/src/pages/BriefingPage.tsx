@@ -1,3 +1,4 @@
+import { headsetBuildReady } from "../services/headsetConfig";
 import { useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft, CheckCircle2, Clock, Gamepad2, ShieldAlert, Target } from "lucide-react";
 import { AppHeader } from "../components/layout/AppHeader";
@@ -28,9 +29,10 @@ export default function BriefingPage() {
   }
 
   function handleStart() {
-    if (!scenario) return;
-    startSession(scenario.id);
-    navigate(`/training/${scenario.id}`);
+    if (!scenario || !headsetBuildReady) return;
+    try {
+      if (startSession(scenario.id, "unity")) navigate(`/training/${scenario.id}`);
+    } catch (e) { useTrainingStore.getState().reportError((e as Error).message); }
   }
 
   return (
@@ -103,9 +105,14 @@ export default function BriefingPage() {
           </ol>
         </Card>
 
+        <Card className="mt-4">
+          <h3 className="text-sm font-semibold">VR headset training</h3>
+          <p className="mt-3 text-sm text-muted">Use a compatible headset browser on HTTPS. Enter immersive VR in the Unity player before starting the recorded attempt.</p>
+          {!headsetBuildReady && <p role="status" className="mt-3 text-sm text-warning">Headset build not installed. The current desktop simulation has been removed. Upload the integrated WebXR headset build to enable training.</p>}
+        </Card>
         <div className="mt-8 flex justify-end">
-          <Button size="lg" onClick={handleStart}>
-            Start Simulation
+          <Button className="w-full sm:w-auto sm:min-w-48" size="lg" disabled={!headsetBuildReady} onClick={handleStart}>
+            Open Headset Training
           </Button>
         </div>
       </div>

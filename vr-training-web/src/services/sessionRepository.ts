@@ -1,118 +1,62 @@
-import type { SessionResult, UserSession } from "../types";
-
-const KEYS = {
-  userSession: "vr-user-session",
-  activeSession: "vr-active-session",
-  sessions: "vr-training-sessions",
-} as const;
-
-/** Parses JSON from localStorage, returning a fallback instead of throwing on corrupted data. */
-function safeParse<T>(raw: string | null, fallback: T): T {
-  if (raw === null) return fallback;
-  try {
-    const parsed = JSON.parse(raw);
-    return parsed ?? fallback;
-  } catch {
-    console.error(`sessionRepository: corrupted JSON in localStorage, falling back to default.`);
-    return fallback;
-  }
+import type { SessionResult, UserSession } from '../types';
+import { stopClock } from './trainingState';
+interface Cache { active: SessionResult | null; sessions: SessionResult[]; pending: SessionResult[] }
+const USER_KEY = 'vr-user-v2';
+let owner: UserSession | null = null;
+const empty = (): Cache => ({ active: null, sessions: [], pending: [] });
+function key() { return owner?.authMode === 'cloud' ? `vr-cache-v2:${owner.userId}` : 'vr-cache-v2:demo'; }
+function read(): Cache {
+  const raw = localStorage.getItem(key());
+  if (!raw) return empty();
+  const value = JSON.parse(raw) as Cache;
+  if (!Array.isArray(value.sessions) || !Array.isArray(value.pending)) throw new Error('Training cache is damaged. Export or clear browser data before continuing.');
+  return value;
 }
-
-function safeWrite(key: string, value: unknown): void {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch (err) {
-    console.error(`sessionRepository: failed to write "${key}" to localStorage.`, err);
-  }
+function write(value: Cache) {
+  try { localStorage.setItem(key(), JSON.stringify(value)); }
+  catch { throw new Error('Cannot save training data in this browser. Free storage space or enable site storage, then retry.'); }
 }
-
+function upsert(list: SessionResult[], session: SessionResult) {
+  return [...list.filter(s => s.sessionId !== session.sessionId), session];
+}
 export const sessionRepository = {
-  // --- user session ---
-  saveUserSession(session: UserSession): void {
-    safeWrite(KEYS.userSession, session);
+  setOwner(user: UserSession | null) { owner = user; },
+  saveUserSession(user: UserSession) { localStorage.setItem(USER_KEY, JSON.stringify(user)); },
+  loadUserSession(): UserSession | null { try { return JSON.parse(localStorage.getItem(USER_KEY) || 'null'); } catch { return null; } },
+  clearUserSession() { localStorage.removeItem(USER_KEY); owner = null; },
+  commit(session: SessionResult) {
+    if (!owner || owner.userId !== session.userId) throw new Error('This training session belongs to another account.');
+    const cache = read(); const snapshot = stopClock(session);
+    cache.active = session.status === 'in-progress' ? snapshot : null;
+    cache.sessions = upsert(cache.sessions, snapshot);
+    if (owner.authMode === 'cloud') cache.pending = upsert(cache.pending, snapshot);
+    write(cache);
   },
-  loadUserSession(): UserSession | null {
-    return safeParse<UserSession | null>(localStorage.getItem(KEYS.userSession), null);
-  },
-  clearUserSession(): void {
-    localStorage.removeItem(KEYS.userSession);
-  },
-
-  // --- active (in-progress) session ---
-  saveActiveSession(session: SessionResult): void {
-    safeWrite(KEYS.activeSession, session);
-  },
-  loadActiveSession(): SessionResult | null {
-    return safeParse<SessionResult | null>(localStorage.getItem(KEYS.activeSession), null);
-  },
-  clearActiveSession(): void {
-    localStorage.removeItem(KEYS.activeSession);
-  },
-
-  // --- completed / exited session history ---
+  loadActiveSession(): SessionResult | null { const s = read().active; return s?.userId === owner?.userId ? s : null; },
+  clearActiveSession() { const c = read(); c.active = null; write(c); },
   loadAllSessions(): SessionResult[] {
-    return safeParse<SessionResult[]>(localStorage.getItem(KEYS.sessions), []);
+    const list = read().sessions;
+    return owner?.role === 'educator' ? list : list.filter(s => s.userId === owner?.userId);
   },
-  loadSessionsForUser(userId: string): SessionResult[] {
-    return this.loadAllSessions()
-      .filter((s) => s.userId === userId)
-      .sort((a, b) => (b.endTime ?? b.startTime).localeCompare(a.endTime ?? a.startTime));
+  pending(): SessionResult[] { return read().pending.filter(s => s.userId === owner?.userId); },
+  acknowledge(session: SessionResult) {
+    const c = read(); c.pending = c.pending.filter(s => s.sessionId !== session.sessionId || (s.revision ?? 0) > (session.revision ?? 0)); write(c);
   },
-  loadSessionsForScenario(scenarioId: string): SessionResult[] {
-    return this.loadAllSessions().filter((s) => s.scenarioId === scenarioId);
+  mergeRemote(sessions: SessionResult[]) {
+    const c = read();
+    const pendingIds = new Set(c.pending.map(s => s.sessionId));
+    // Cloud query is RLS-filtered: never carry revoked educator records into a refreshed view.
+    c.sessions = [...sessions.filter(s => !pendingIds.has(s.sessionId)), ...c.pending];
+    write(c);
   },
-
-  /** Saves or replaces a session record by sessionId, so an attempt that is
-   * later completed updates its own row instead of creating a duplicate. */
-  saveSession(session: SessionResult): void {
-    const all = this.loadAllSessions();
-    const index = all.findIndex((s) => s.sessionId === session.sessionId);
-    if (index >= 0) {
-      all[index] = session;
-    } else {
-      all.push(session);
-    }
-    safeWrite(KEYS.sessions, all);
+  clearAllSessions() {
+    if (owner?.authMode === 'cloud') throw new Error('Cloud history is retained. Use the database administration workflow to delete records.');
+    const c = read(); c.sessions = c.sessions.filter(s => s.userId !== owner?.userId); c.active = null; write(c);
   },
-
-  clearAllSessions(): void {
-    localStorage.removeItem(KEYS.sessions);
-    localStorage.removeItem(KEYS.activeSession);
-  },
-
-  /** Removes only generated demo sessions (sessionId starting with
-   * "demo-"), leaving real trainee attempts untouched. Previously the
-   * dashboard's "Clear Demo Data" button called clearAllSessions(), which
-   * deleted every real session (and the in-progress one) right along with
-   * the demo data it claimed to target. */
-  clearDemoSessions(): SessionResult[] {
-    const remaining = this.loadAllSessions().filter((s) => !s.sessionId.startsWith("demo-"));
-    this.replaceAllSessions(remaining);
-    return remaining;
-  },
-
-  replaceAllSessions(sessions: SessionResult[]): void {
-    safeWrite(KEYS.sessions, sessions);
-  },
-
-  // --- aggregate stats ---
-  calculateAverageScore(sessions: SessionResult[]): number {
-    const completed = sessions.filter((s) => s.status === "completed");
-    if (completed.length === 0) return 0;
-    return completed.reduce((sum, s) => sum + s.finalScore, 0) / completed.length;
-  },
-  calculateAverageDuration(sessions: SessionResult[]): number {
-    const completed = sessions.filter((s) => s.status === "completed");
-    if (completed.length === 0) return 0;
-    return completed.reduce((sum, s) => sum + s.durationSeconds, 0) / completed.length;
-  },
-  calculateCompletionRate(sessions: SessionResult[]): number {
-    if (sessions.length === 0) return 0;
-    return (sessions.filter((s) => s.status === "completed").length / sessions.length) * 100;
-  },
-  calculatePassRate(sessions: SessionResult[]): number {
-    const completed = sessions.filter((s) => s.status === "completed");
-    if (completed.length === 0) return 0;
-    return (completed.filter((s) => s.passed).length / completed.length) * 100;
-  },
+  clearDemoSessions() { const c = read(); c.sessions = c.sessions.filter(s => !s.sessionId.startsWith('demo-')); write(c); return c.sessions; },
+  replaceAllSessions(sessions: SessionResult[]) { const c = read(); c.sessions = sessions; write(c); },
+  calculateAverageScore(sessions: SessionResult[]) { const list = sessions.filter(s => s.status === 'completed'); return list.length ? list.reduce((n,s) => n+s.finalScore,0)/list.length : 0; },
+  calculateAverageDuration(sessions: SessionResult[]) { const list = sessions.filter(s => s.status === 'completed'); return list.length ? list.reduce((n,s) => n+s.durationSeconds,0)/list.length : 0; },
+  calculateCompletionRate(sessions: SessionResult[]) { return sessions.length ? sessions.filter(s => s.status === 'completed').length/sessions.length*100 : 0; },
+  calculatePassRate(sessions: SessionResult[]) { const list = sessions.filter(s => s.status === 'completed'); return list.length ? list.filter(s => s.passed).length/list.length*100 : 0; }
 };

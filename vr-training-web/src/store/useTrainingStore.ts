@@ -1,314 +1,133 @@
-import { create } from "zustand";
-import type {
-  AccessibilitySettings,
-  InteractionLog,
-  Scenario,
-  SessionResult,
-  UserRole,
-  UserSession,
-} from "../types";
-import { DEFAULT_SETTINGS } from "../types";
-import { sessionRepository } from "../services/sessionRepository";
-import { settingsService } from "../services/settingsService";
-import { getScenarioById } from "../data/scenarios";
-
-function uuid(): string {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-    return crypto.randomUUID();
-  }
-  // Fallback for environments without crypto.randomUUID (older browsers).
-  return `sess-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-}
-
-function log(type: InteractionLog["type"], taskId?: string, message?: string): InteractionLog {
-  return { id: uuid(), timestamp: new Date().toISOString(), type, taskId, message };
-}
-
+import { create } from 'zustand';
+import type { AccessibilitySettings, Scenario, SessionResult, UserSession } from '../types';
+import { DEFAULT_SETTINGS } from '../types';
+import type { UnityEvent } from '../types/unityMessages';
+import { sessionRepository as repo } from '../services/sessionRepository';
+import { settingsService } from '../services/settingsService';
+import { authService } from '../services/authService';
+import { trainingApi } from '../services/trainingApi';
+import { getScenarioById } from '../data/scenarios';
+import { reduceTrainingEvent, stopClock } from '../services/trainingState';
 interface AppState {
-  currentUser: UserSession | null;
-  selectedScenario: Scenario | null;
-  activeSession: SessionResult | null;
-  sessions: SessionResult[];
-  settings: AccessibilitySettings;
-  isPaused: boolean;
-
-  // lifecycle
-  selectRole: (role: UserRole, userId: string) => void;
-  signOut: () => void;
-  selectScenario: (scenarioId: string) => void;
-  startSession: (scenarioId: string) => SessionResult | null;
-  resumeActiveSession: () => void;
-  completeTask: (taskId: string) => void;
-  recordMistake: (taskId: string, message: string) => void;
-  pauseSession: () => void;
-  resumeSession: () => void;
-  restartSession: () => void;
-  exitSession: () => void;
-  finishSession: () => SessionResult | null;
-
-  // data
-  loadSessions: () => void;
-  clearAllSessions: () => void;
-  clearDemoData: () => void;
-  seedDemoData: (sessions: SessionResult[]) => void;
-
-  // settings
-  updateSettings: (partial: Partial<AccessibilitySettings>) => void;
+  currentUser: UserSession | null; selectedScenario: Scenario | null; activeSession: SessionResult | null;
+  sessions: SessionResult[]; settings: AccessibilitySettings; isPaused: boolean; initialized: boolean;
+  syncStatus: 'local' | 'saving' | 'saved' | 'error'; syncError: string | null; error: string | null;
+  initialize: () => Promise<void>; setUser: (user: UserSession) => void;
+  signOut: () => Promise<void>;
+  selectScenario: (id: string) => void; startSession: (id: string, source?: 'unity' | 'demo') => SessionResult | null;
+  resumeActiveSession: () => void; pauseSession: () => void; resumeSession: () => void;
+  restartSession: () => void; exitSession: () => void;
+  applyEvent: (event: UnityEvent) => { accepted: boolean; reason?: string };
+  sync: () => Promise<void>; loadSessions: () => void; clearAllSessions: () => void;
+  updateSettings: (partial: Partial<AccessibilitySettings>) => void; reportError: (message: string | null) => void;
 }
-
-const MISTAKE_PENALTY = 5;
-
-function computeScore(session: SessionResult): number {
-  const completedScore = session.taskResults.reduce((total, t) => total + (t.completed ? t.maxScore : 0), 0);
-  const penalty = session.mistakeCount * MISTAKE_PENALTY;
-  return Math.max(0, Math.min(session.maxPossibleScore, completedScore - penalty));
-}
-
-function buildImprovementNotes(session: SessionResult): string[] {
-  const notes: string[] = [];
-
-  const incomplete = session.taskResults.filter((t) => !t.completed);
-  if (incomplete.length > 0) {
-    notes.push(
-      `${incomplete.length} task(s) not completed: ${incomplete.map((t) => t.title).join(", ")}.`
-    );
-  }
-
-  session.taskResults
-    .filter((t) => t.mistakes > 0)
-    .forEach((t) => {
-      notes.push(
-        t.mistakes === 1
-          ? `One mistake recorded on "${t.title}" - review the correct steps and try again.`
-          : `${t.mistakes} mistakes recorded on "${t.title}" - this step needs more practice.`
-      );
-    });
-
-  if (notes.length === 0) {
-    notes.push("No mistakes recorded - great work, keep this pace on the next scenario.");
-  }
-
-  return notes;
-}
-
-export const useTrainingStore = create<AppState>((set, get) => ({
-  currentUser: sessionRepository.loadUserSession(),
-  selectedScenario: null,
-  activeSession: sessionRepository.loadActiveSession(),
-  sessions: sessionRepository.loadAllSessions(),
-  settings: settingsService.load(),
-  isPaused: false,
-
-  selectRole: (role, userId) => {
-    const session: UserSession = { userId, role };
-    sessionRepository.saveUserSession(session);
-    set({ currentUser: session });
-  },
-
-  signOut: () => {
-    sessionRepository.clearUserSession();
-    set({ currentUser: null, selectedScenario: null });
-  },
-
-  selectScenario: (scenarioId) => {
-    const scenario = getScenarioById(scenarioId) ?? null;
-    set({ selectedScenario: scenario });
-  },
-
-  startSession: (scenarioId) => {
-    const scenario = getScenarioById(scenarioId);
-    const user = get().currentUser;
-    if (!scenario || !scenario.available || !user) return null;
-
-    const session: SessionResult = {
-      sessionId: uuid(),
-      userId: user.userId,
-      scenarioId: scenario.id,
-      scenarioName: scenario.name,
-      startTime: new Date().toISOString(),
-      durationSeconds: 0,
-      finalScore: 0,
-      maxPossibleScore: scenario.tasks.reduce((total, t) => total + t.maxScore, 0),
-      completedTaskCount: 0,
-      totalTaskCount: scenario.tasks.length,
-      mistakeCount: 0,
-      passed: false,
-      status: "in-progress",
-      taskResults: scenario.tasks.map((t) => ({ ...t, completed: false, mistakes: 0, completionTime: undefined })),
-      improvementNotes: [],
-      interactionLogs: [log("session-started")],
-    };
-
-    sessionRepository.saveActiveSession(session);
-    set({ activeSession: session, selectedScenario: scenario, isPaused: false });
-    return session;
-  },
-
-  resumeActiveSession: () => {
-    const active = sessionRepository.loadActiveSession();
-    if (!active) return;
-    const scenario = getScenarioById(active.scenarioId) ?? null;
-    set({ activeSession: active, selectedScenario: scenario, isPaused: false });
-  },
-
-  completeTask: (taskId) => {
+let initializing: Promise<void> | undefined;
+let syncing: Promise<void> | undefined;
+let identityVersion = 0;
+export const useTrainingStore = create<AppState>((set, get) => {
+  const persist = (session: SessionResult) => {
+    try { repo.commit(session); }
+    catch (e) { set({ error: (e as Error).message }); throw e; }
+    set({ activeSession: session.status === 'in-progress' ? session : null, sessions: repo.loadAllSessions(), isPaused: !session.runningSince });
+    void get().sync();
+  };
+  const clock = (running: boolean) => {
     const session = get().activeSession;
-    if (!session || session.status !== "in-progress") return;
-
-    const target = session.taskResults.find((t) => t.id === taskId);
-    if (!target || target.completed) return;
-
-    // Enforce in-order completion: a task can only complete if every task
-    // before it in the list is already done. Attempting a later task early
-    // is handled by the caller (recordMistake + a "do the current task
-    // first" toast), not here.
-    const index = session.taskResults.findIndex((t) => t.id === taskId);
-    const prerequisitesMet = session.taskResults.slice(0, index).every((t) => t.completed);
-    if (!prerequisitesMet) return;
-
-    const elapsed = (Date.now() - new Date(session.startTime).getTime()) / 1000;
-
-    const updatedTasks = session.taskResults.map((t) =>
-      t.id === taskId ? { ...t, completed: true, completionTime: elapsed } : t
-    );
-
-    const updated: SessionResult = {
-      ...session,
-      taskResults: updatedTasks,
-      completedTaskCount: updatedTasks.filter((t) => t.completed).length,
-      durationSeconds: elapsed,
-      interactionLogs: [...session.interactionLogs, log("task-completed", taskId)],
-    };
-    updated.finalScore = computeScore(updated);
-
-    sessionRepository.saveActiveSession(updated);
-    set({ activeSession: updated });
-  },
-
-  recordMistake: (taskId, message) => {
-    const session = get().activeSession;
-    if (!session || session.status !== "in-progress") return;
-
-    const updatedTasks = session.taskResults.map((t) =>
-      t.id === taskId ? { ...t, mistakes: t.mistakes + 1 } : t
-    );
-
-    const updated: SessionResult = {
-      ...session,
-      taskResults: updatedTasks,
-      mistakeCount: session.mistakeCount + 1,
-      interactionLogs: [...session.interactionLogs, log("mistake", taskId, message)],
-    };
-    updated.finalScore = computeScore(updated);
-
-    sessionRepository.saveActiveSession(updated);
-    set({ activeSession: updated });
-  },
-
-  pauseSession: () => {
-    const session = get().activeSession;
-    if (!session) return;
-    const updated = { ...session, interactionLogs: [...session.interactionLogs, log("paused")] };
-    sessionRepository.saveActiveSession(updated);
-    set({ activeSession: updated, isPaused: true });
-  },
-
-  resumeSession: () => {
-    const session = get().activeSession;
-    if (!session) return;
-    const updated = { ...session, interactionLogs: [...session.interactionLogs, log("resumed")] };
-    sessionRepository.saveActiveSession(updated);
-    set({ activeSession: updated, isPaused: false });
-  },
-
-  restartSession: () => {
-    const scenario = get().selectedScenario;
-    const user = get().currentUser;
-    if (!scenario || !user) return;
-    get().startSession(scenario.id);
-  },
-
-  exitSession: () => {
-    const session = get().activeSession;
-    if (!session) return;
-
-    const exited: SessionResult = {
-      ...session,
-      status: "exited",
-      endTime: new Date().toISOString(),
-      interactionLogs: [...session.interactionLogs, log("exited")],
-    };
-
-    sessionRepository.saveSession(exited);
-    sessionRepository.clearActiveSession();
-
-    set({
-      activeSession: null,
-      isPaused: false,
-      sessions: sessionRepository.loadAllSessions(),
-    });
-  },
-
-  finishSession: () => {
-    const session = get().activeSession;
-    const scenario = get().selectedScenario;
-    if (!session || !scenario) return null;
-
-    const finalScore = computeScore(session);
-    const finished: SessionResult = {
-      ...session,
-      endTime: new Date().toISOString(),
-      finalScore,
-      passed: finalScore >= scenario.passScore,
-      status: "completed",
-      improvementNotes: buildImprovementNotes(session),
-      interactionLogs: [...session.interactionLogs, log("session-finished")],
-    };
-
-    sessionRepository.saveSession(finished);
-    sessionRepository.clearActiveSession();
-
-    set({
-      activeSession: null,
-      isPaused: false,
-      sessions: sessionRepository.loadAllSessions(),
-    });
-
-    return finished;
-  },
-
-  loadSessions: () => {
-    set({ sessions: sessionRepository.loadAllSessions() });
-  },
-
-  clearAllSessions: () => {
-    sessionRepository.clearAllSessions();
-    set({ sessions: [], activeSession: null });
-  },
-
-  /** Removes only generated demo data, leaving real trainee attempts
-   * (and the active session, if any) untouched - see sessionRepository
-   * .clearDemoSessions for why this is distinct from clearAllSessions. */
-  clearDemoData: () => {
-    const remaining = sessionRepository.clearDemoSessions();
-    set({ sessions: remaining });
-  },
-
-  seedDemoData: (demoSessions) => {
-    // Remove any previously-generated demo sessions first, rather than
-    // appending on top of them - clicking "Generate Demo Data" repeatedly
-    // previously kept adding another 12 rows each time, quickly producing
-    // dozens of duplicate-looking records instead of refreshing the same
-    // ~12.
-    const realSessions = sessionRepository.loadAllSessions().filter((s) => !s.sessionId.startsWith("demo-"));
-    const combined = [...realSessions, ...demoSessions];
-    sessionRepository.replaceAllSessions(combined);
-    set({ sessions: combined });
-  },
-
-  updateSettings: (partial) => {
-    const updated = { ...get().settings, ...partial };
-    settingsService.save(updated);
-    set({ settings: updated });
-  },
-}));
+    if (!session || Boolean(session.runningSince) === running) return;
+    const next = running ? { ...session, runningSince: Date.now() } : stopClock(session);
+    next.revision = (next.revision ?? 0) + 1;
+    next.interactionLogs = [...next.interactionLogs, { id: crypto.randomUUID(), timestamp: new Date().toISOString(), type: running ? 'resumed' : 'paused' }];
+    persist(next);
+  };
+  return {
+    currentUser: null, selectedScenario: null, activeSession: null, sessions: [], settings: settingsService.load() ?? DEFAULT_SETTINGS,
+    isPaused: true, initialized: false, syncStatus: 'local', syncError: null, error: null,
+    initialize: () => {
+      if (initializing) return initializing;
+      initializing = (async () => {
+        try {
+          const user = await authService.restore();
+          if (user) get().setUser(user);
+        } catch (e) { set({ error: (e as Error).message }); }
+        finally { set({ initialized: true }); }
+      })();
+      return initializing;
+    },
+    setUser: user => {
+      identityVersion++; repo.setOwner(user); repo.saveUserSession(user);
+      const active = repo.loadActiveSession();
+      set({ currentUser: user, activeSession: active, selectedScenario: active ? getScenarioById(active.scenarioId) ?? null : null,
+        sessions: repo.loadAllSessions(), isPaused: true, error: null, syncError: null, syncStatus: user.authMode === 'cloud' ? 'saving' : 'local' });
+      // An old-account request must finish before starting a new account's sync.
+      if (syncing) void syncing.finally(() => get().sync()); else void get().sync();
+    },
+    signOut: async () => {
+      get().pauseSession();
+      if (get().currentUser?.authMode === 'cloud') await authService.logout();
+      identityVersion++; repo.clearUserSession();
+      set({ currentUser: null, activeSession: null, selectedScenario: null, sessions: [], isPaused: true, syncStatus: 'local', syncError: null, error: null });
+    },
+    selectScenario: id => set({ selectedScenario: getScenarioById(id) ?? null }),
+    startSession: (id, source = 'unity') => {
+      const scenario = getScenarioById(id); const user = get().currentUser;
+      if (source !== 'unity') throw new Error('Simulation training has been removed.');
+      if (!scenario?.available || !user) return null;
+      if (get().activeSession) get().exitSession();
+      const session: SessionResult = {
+        sessionId: crypto.randomUUID(), userId: user.userId, scenarioId: id, scenarioName: scenario.name,
+        source, trainingMode: 'desktop', revision: 1, startTime: new Date().toISOString(), durationSeconds: 0,
+        finalScore: 0, maxPossibleScore: scenario.tasks.reduce((n,t) => n+t.maxScore,0), completedTaskCount: 0,
+        totalTaskCount: scenario.tasks.length, mistakeCount: 0, passed: false, status: 'in-progress',
+        taskResults: scenario.tasks.map(t => ({ ...t, completed: false, mistakes: 0 })), improvementNotes: [],
+        interactionLogs: [{ id: crypto.randomUUID(), timestamp: new Date().toISOString(), type: 'session-started' }]
+      };
+      set({ selectedScenario: scenario }); persist(session); return session;
+    },
+    resumeActiveSession: () => {
+      const active = repo.loadActiveSession();
+      set({ activeSession: active, selectedScenario: active ? getScenarioById(active.scenarioId) ?? null : null, isPaused: true });
+    },
+    pauseSession: () => clock(false), resumeSession: () => clock(true),
+    restartSession: () => { const s = get().activeSession; if (s) get().startSession(s.scenarioId, s.source); },
+    exitSession: () => {
+      const s = get().activeSession; if (!s) return;
+      persist({ ...stopClock(s), revision: (s.revision ?? 0)+1, status: 'exited', endTime: new Date().toISOString(),
+        interactionLogs: [...s.interactionLogs, { id: crypto.randomUUID(), timestamp: new Date().toISOString(), type: 'exited' }] });
+    },
+    applyEvent: event => {
+      const s = get().activeSession; const scenario = getScenarioById(event.scenarioId);
+      if (!s || !scenario) return { accepted: false, reason: 'No active session.' };
+      const result = reduceTrainingEvent(s, scenario, event);
+      if (result.accepted && result.session !== s) persist(result.session);
+      return { accepted: result.accepted, reason: result.reason };
+    },
+    sync: () => {
+      if (get().currentUser?.authMode !== 'cloud') { set({ syncStatus: 'local', syncError: null }); return Promise.resolve(); }
+      if (syncing) return syncing;
+      const version = identityVersion;
+      set({ syncStatus: 'saving' });
+      syncing = (async () => {
+        try {
+          while (version === identityVersion && repo.pending().length) {
+            for (const session of repo.pending()) {
+              if (version !== identityVersion) return;
+              await trainingApi.save(session);
+              if (version !== identityVersion) return;
+              repo.acknowledge(session);
+            }
+          }
+          const sessions = await trainingApi.list();
+          if (version !== identityVersion) return;
+          repo.mergeRemote(sessions); set({ sessions: repo.loadAllSessions(), syncStatus: repo.pending().length ? 'saving' : 'saved', syncError: null });
+          if (repo.pending().length) setTimeout(() => { void get().sync(); }, 0);
+        } catch (e) { if (version === identityVersion) set({ syncStatus: 'error', syncError: `Cloud sync failed; records remain in this browser. ${(e as Error).message}` }); }
+        finally { syncing = undefined; }
+      })();
+      return syncing;
+    },
+    loadSessions: () => { set({ sessions: repo.loadAllSessions() }); void get().sync(); },
+    clearAllSessions: () => { repo.clearAllSessions(); set({ sessions: repo.loadAllSessions(), activeSession: null }); },
+    updateSettings: partial => { const settings = { ...get().settings, ...partial }; settingsService.save(settings); set({ settings }); },
+    reportError: error => set({ error })
+  };
+});
